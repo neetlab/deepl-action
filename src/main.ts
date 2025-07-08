@@ -2,12 +2,12 @@ import fs from 'fs/promises';
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
-const deeplAuthKey = core.getInput('deeplAuthKey', { required: true });
-const sourceFile = core.getInput('sourceFile', { required: true });
-const sourceLang = core.getInput('sourceLang', { required: true });
-const targetFile = core.getInput('targetFile', { required: true });
-const targetLang = core.getInput('targetLang', { required: true });
-const createPullRequest = core.getBooleanInput('createPullRequest', { required: false });
+const deeplAuthKey = core.getInput('deepl-auth-key', { required: true });
+const githubToken = core.getInput('github-token', { required: true });
+const sourceFile = core.getInput('source-file', { required: true });
+const sourceLang = core.getInput('source-lang', { required: true });
+const targetFile = core.getInput('target-file', { required: true });
+const targetLang = core.getInput('target-lang', { required: true });
 
 async function main() {
   const content = await fs.readFile(sourceFile, 'utf8');
@@ -39,27 +39,78 @@ async function main() {
 
   const translatedText = data.translations[0].text;
 
-  await fs.writeFile(targetFile, translatedText, 'utf8');
+  // --------------------------------------------
+  // コミット
+  // --------------------------------------------
+  const octokit = github.getOctokit(githubToken);
 
-  if (!createPullRequest) {
-    core.info(`Translation successful! Translated text written to ${targetFile}`);
-    core.setOutput('exitCode', 0);
-    return;
-  }
-
-  const octokit = github.getOctokit(core.getInput('githubToken', { required: true }));
   const { owner, repo } = github.context.repo;
-  const branchName = `translate-${sourceLang}-to-${targetLang}`;
-  const baseBranch = github.context.ref.replace('refs/heads/', '');
+  const { data: repoData } = await octokit.rest.repos.get({ owner, repo });
+  const baseBranch = repoData.default_branch;
 
-  // Create a new branch
+  const { data: refData } = await octokit.rest.git.getRef({
+    owner,
+    repo,
+    ref: `heads/${baseBranch}`
+  });
+
+  const baseSha = refData.object.sha;
+
+  const { data: commitData } = await octokit.rest.git.getCommit({
+    owner,
+    repo,
+    commit_sha: baseSha,
+  });
+
+  const baseTreeSha = commitData.tree.sha;
+
+  const blob = await octokit.rest.git.createBlob({
+    owner,
+    repo,
+    content: translatedText,
+    encoding: "utf-8",
+  });
+
+  const tree = await octokit.rest.git.createTree({
+    owner,
+    repo,
+    base_tree: baseTreeSha,
+    tree: [
+      {
+        path: targetFile,
+        mode: "100644",
+        type: "blob",
+        sha: blob.data.sha,
+      },
+    ],
+  });
+
+  const newCommit = await octokit.rest.git.createCommit({
+    owner,
+    repo,
+    message: `Translate ${targetFile}`,
+    tree: tree.data.sha,
+    parents: [baseSha],
+  });
+
+  const branchName = `auto/update-${Date.now()}`;
   await octokit.rest.git.createRef({
     owner,
     repo,
     ref: `refs/heads/${branchName}`,
-    sha: github.context.sha
+    sha: newCommit.data.sha,
   });
 
+  await octokit.rest.pulls.create({
+    owner,
+    repo,
+    title: `Translate ${targetFile}`,
+    head: branchName,
+    base: baseBranch,
+    body: "This PR was created automatically via REST API.",
+  });
+
+  console.log("Pull request created!");
 }
 
 main().catch((error) => {

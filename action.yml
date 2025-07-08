@@ -2,18 +2,18 @@
 name: "deepl-action"
 description: "Translate a text file using DeepL API"
 inputs:
-  deeplAuthKey:
+  deepl-auth-key:
     description: "Your DeepL API key"
-  sourceFile:
+  github-token:
+    description: "GitHub token for creating pull requests"
+  source-file:
     description: "Path to the source text file to be translated"
-  sourceLang:
+  source-lang:
     description: "Language code of the source text"
-  targetFile:
+  target-file:
     description: "Path to the target text file where the translation will be saved"
-  targetLang:
+  target-lang:
     description: "Language code of the target text"
-  createPullRequest:
-    description: "Create a pull request with the translated file"
 runs:
   using: "node20"
   main: "dist/main.js"
