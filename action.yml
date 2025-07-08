@@ -1,0 +1,19 @@
+# https://docs.github.com/en/actions/reference/metadata-syntax-reference
+name: "deepl-action"
+description: "Translate a text file using DeepL API"
+inputs:
+  deeplAuthKey:
+    description: "Your DeepL API key"
+  sourceFile:
+    description: "Path to the source text file to be translated"
+  sourceLang:
+    description: "Language code of the source text"
+  targetFile:
+    description: "Path to the target text file where the translation will be saved"
+  targetLang:
+    description: "Language code of the target text"
+  createPullRequest:
+    description: "Create a pull request with the translated file"
+runs:
+  using: "node20"
+  main: "dist/main.js"

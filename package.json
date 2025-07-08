@@ -1,0 +1,25 @@
+{
+  "name": "deepl-action",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neetlab/deepl-action.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/neetlab/deepl-action/issues"
+  },
+  "homepage": "https://github.com/neetlab/deepl-action#readme",
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.1",
+    "@types/node": "^24.0.10",
+    "typescript": "^5.8.3"
+  }
+}
