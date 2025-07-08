@@ -1,6 +1,10 @@
 import fs from 'fs/promises';
 import * as core from '@actions/core';
 import * as github from '@actions/github';
+import { diff } from './utils/diff';
+import { getIn, setIn } from './utils/get_in';
+import { zip } from './utils/zip';
+
 
 const deeplAuthKey = core.getInput('deepl-auth-key', { required: true });
 const githubToken = core.getInput('github-token', { required: true });
@@ -9,9 +13,19 @@ const sourceLang = core.getInput('source-lang', { required: true });
 const targetFile = core.getInput('target-file', { required: true });
 const targetLang = core.getInput('target-lang', { required: true });
 
-async function main() {
-  const content = await fs.readFile(sourceFile, 'utf8');
+const readFileAsJsonOrDefault = async (filePath: string, defaultValue: Record<string, unknown>): Promise<Record<string, unknown>> => {
+  try {
+    const content = await fs.readFile(filePath, 'utf8');
+    return JSON.parse(content);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return defaultValue;
+    }
+    throw error;
+  }
+}
 
+const translate = async (text: string[], sourceLang: string, targetLang: string): Promise<string[]> => {
   const response = await fetch('https://api-free.deepl.com/v2/translate', {
     method: 'POST',
     headers: {
@@ -19,9 +33,7 @@ async function main() {
       "Authorization": `DeepL-Auth-Key ${deeplAuthKey}`
     },
     body: JSON.stringify({
-      "text": [
-        content,
-      ],
+      "text": text,
       "source_lang": sourceLang,
       "target_lang": targetLang
     })
@@ -37,11 +49,75 @@ async function main() {
     throw new Error('No translations found in the response');
   }
 
-  const translatedText = data.translations[0].text;
+  return data.translations.map((translation: { text: string }) => translation.text);
+}
+
+type ResultEntryAdded = {
+  type: 'added';
+  key: string;
+  source: string;
+  target: string;
+}
+
+type ResultEntryRemoved = {
+  type: 'removed';
+  key: string;
+  source: null;
+  target: string;
+}
+
+type ResultEntry = ResultEntryAdded | ResultEntryRemoved;
+
+const generateMarkdownTable = (entries: ResultEntry[]): string => {
+  let result = "";
+
+  result += `| 種別 | キー | ${sourceLang} | ${targetLang} |\n`;
+  result += "| :--- | :--- | :--- | :--- |\n";
+
+  for (const entry of entries) {
+    const type = entry.type === 'added' ? '追加' : '削除';
+    result += `| ${type} | \`${entry.key}\` | ${entry.source} | ${entry.target} |\n`;
+  }
+
+  return result;
+};
+
+async function main() {
+  const source = await readFileAsJsonOrDefault(sourceFile, {});
+  const target = await readFileAsJsonOrDefault(targetFile, {});
+
+  const differences = diff(target, source);
+  const entries: ResultEntry[] = [];
+
+  const textsToTranslate = differences.added.map((added) => getIn(source, added)) as string[];
+  const translations = await translate(textsToTranslate, sourceLang, targetLang);
+
+  for (const [path, translation] of zip(differences.added, translations)) {
+    setIn(target, path, translation);
+    entries.push({
+      type: 'added',
+      key: path.join('.'),
+      source: getIn(source, path) as string,
+      target: translation,
+    });
+  }
+
+  for (const removed of differences.removed) {
+    entries.push({
+      type: 'removed',
+      key: removed.join('.'),
+      source: null,
+      target: getIn(target, removed) as string,
+    });
+    setIn(target, removed, undefined);
+  }
+
+  const translatedText = JSON.stringify(target, null, 2);
 
   // --------------------------------------------
   // コミット
   // --------------------------------------------
+
   const octokit = github.getOctokit(githubToken);
 
   const { owner, repo } = github.context.repo;
@@ -107,7 +183,7 @@ async function main() {
     title: `Translate ${targetFile}`,
     head: branchName,
     base: baseBranch,
-    body: "This PR was created automatically via REST API.",
+    body: `This PR was created automatically via neetlab/deepl-action.\n${generateMarkdownTable(entries)}`,
   });
 
   console.log("Pull request created!");

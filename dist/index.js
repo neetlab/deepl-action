@@ -29969,38 +29969,87 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 const promises_1 = __importDefault(__nccwpck_require__(1943));
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
+const diff_1 = __nccwpck_require__(2158);
+const get_in_1 = __nccwpck_require__(5779);
+const zip_1 = __nccwpck_require__(7238);
 const deeplAuthKey = core.getInput('deepl-auth-key', { required: true });
 const githubToken = core.getInput('github-token', { required: true });
 const sourceFile = core.getInput('source-file', { required: true });
 const sourceLang = core.getInput('source-lang', { required: true });
 const targetFile = core.getInput('target-file', { required: true });
 const targetLang = core.getInput('target-lang', { required: true });
+const readFileAsJsonOrDefault = (filePath, defaultValue) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const content = yield promises_1.default.readFile(filePath, 'utf8');
+        return JSON.parse(content);
+    }
+    catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+            return defaultValue;
+        }
+        throw error;
+    }
+});
+const translate = (text, sourceLang, targetLang) => __awaiter(void 0, void 0, void 0, function* () {
+    const response = yield fetch('https://api-free.deepl.com/v2/translate', {
+        method: 'POST',
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `DeepL-Auth-Key ${deeplAuthKey}`
+        },
+        body: JSON.stringify({
+            "text": text,
+            "source_lang": sourceLang,
+            "target_lang": targetLang
+        })
+    });
+    if (!response.ok) {
+        const errorText = yield response.text();
+        throw new Error(`Failed to translate: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+    const data = yield response.json();
+    if (!data || !data.translations || data.translations.length === 0) {
+        throw new Error('No translations found in the response');
+    }
+    return data.translations.map((translation) => translation.text);
+});
+const generateMarkdownTable = (entries) => {
+    let result = "";
+    result += `| 種別 | キー | ${sourceLang} | ${targetLang} |\n`;
+    result += "| :--- | :--- | :--- | :--- |\n";
+    for (const entry of entries) {
+        const type = entry.type === 'added' ? '追加' : '削除';
+        result += `| ${type} | \`${entry.key}\` | ${entry.source} | ${entry.target} |\n`;
+    }
+    return result;
+};
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
-        const content = yield promises_1.default.readFile(sourceFile, 'utf8');
-        const response = yield fetch('https://api-free.deepl.com/v2/translate', {
-            method: 'POST',
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `DeepL-Auth-Key ${deeplAuthKey}`
-            },
-            body: JSON.stringify({
-                "text": [
-                    content,
-                ],
-                "source_lang": sourceLang,
-                "target_lang": targetLang
-            })
-        });
-        if (!response.ok) {
-            const errorText = yield response.text();
-            throw new Error(`Failed to translate: ${response.status} ${response.statusText} - ${errorText}`);
+        const source = yield readFileAsJsonOrDefault(sourceFile, {});
+        const target = yield readFileAsJsonOrDefault(targetFile, {});
+        const differences = (0, diff_1.diff)(target, source);
+        const entries = [];
+        const textsToTranslate = differences.added.map((added) => (0, get_in_1.getIn)(source, added));
+        const translations = yield translate(textsToTranslate, sourceLang, targetLang);
+        for (const [path, translation] of (0, zip_1.zip)(differences.added, translations)) {
+            (0, get_in_1.setIn)(target, path, translation);
+            entries.push({
+                type: 'added',
+                key: path.join('.'),
+                source: (0, get_in_1.getIn)(source, path),
+                target: translation,
+            });
         }
-        const data = yield response.json();
-        if (!data || !data.translations || data.translations.length === 0) {
-            throw new Error('No translations found in the response');
+        for (const removed of differences.removed) {
+            entries.push({
+                type: 'removed',
+                key: removed.join('.'),
+                source: null,
+                target: (0, get_in_1.getIn)(target, removed),
+            });
+            (0, get_in_1.setIn)(target, removed, undefined);
         }
-        const translatedText = data.translations[0].text;
+        const translatedText = JSON.stringify(target, null, 2);
         // --------------------------------------------
         // コミット
         // --------------------------------------------
@@ -30059,7 +30108,7 @@ function main() {
             title: `Translate ${targetFile}`,
             head: branchName,
             base: baseBranch,
-            body: "This PR was created automatically via REST API.",
+            body: `This PR was created automatically via neetlab/deepl-action.\n${generateMarkdownTable(entries)}`,
         });
         console.log("Pull request created!");
     });
@@ -30067,6 +30116,105 @@ function main() {
 main().catch((error) => {
     core.setFailed(`Action failed with error: ${error.message}`);
 });
+
+
+/***/ }),
+
+/***/ 2158:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.diff = void 0;
+const isObject = (value) => {
+    return value && typeof value === 'object' && !Array.isArray(value);
+};
+const createDeepDiff = (prev, next, path = []) => {
+    const diff = { added: [], removed: [] };
+    const prevKeys = Object.keys(prev);
+    const nextKeys = Object.keys(next);
+    for (const key of nextKeys) {
+        if (!prevKeys.includes(key)) {
+            diff.added.push([...path, key]);
+        }
+        if (isObject(prev[key]) && isObject(next[key])) {
+            const nestedDiff = createDeepDiff(prev[key], next[key], [...path, key]);
+            diff.added.push(...nestedDiff.added);
+            diff.removed.push(...nestedDiff.removed);
+        }
+    }
+    for (const key of prevKeys) {
+        if (!nextKeys.includes(key)) {
+            diff.removed.push([...path, key]);
+        }
+    }
+    return diff;
+};
+exports.diff = createDeepDiff;
+
+
+/***/ }),
+
+/***/ 5779:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.setIn = exports.getIn = void 0;
+const getIn = (obj, path) => {
+    if (!obj || !path || path.length === 0) {
+        return undefined;
+    }
+    let current = obj;
+    for (const key of path) {
+        if (current && key in current) {
+            current = current[key];
+        }
+        else {
+            return undefined;
+        }
+    }
+    return current;
+};
+exports.getIn = getIn;
+const setIn = (obj, path, value) => {
+    if (!obj || !path || path.length === 0) {
+        return obj;
+    }
+    let current = obj;
+    for (let i = 0; i < path.length - 1; i++) {
+        const key = path[i];
+        if (!(key in current)) {
+            current[key] = {};
+        }
+        current = current[key];
+    }
+    current[path[path.length - 1]] = value;
+    return obj;
+};
+exports.setIn = setIn;
+
+
+/***/ }),
+
+/***/ 7238:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.zip = void 0;
+const zip = (a, b) => {
+    const length = Math.min(a.length, b.length);
+    const result = [];
+    for (let i = 0; i < length; i++) {
+        result.push([a[i], b[i]]);
+    }
+    return result;
+};
+exports.zip = zip;
 
 
 /***/ }),
