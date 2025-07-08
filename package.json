@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "npx ncc build src/main.ts -o dist",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -20,6 +21,7 @@
     "@actions/core": "^1.11.1",
     "@actions/github": "^6.0.1",
     "@types/node": "^24.0.10",
+    "@vercel/ncc": "^0.38.3",
     "typescript": "^5.8.3"
   }
 }

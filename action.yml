@@ -16,4 +16,4 @@ inputs:
     description: "Language code of the target text"
 runs:
   using: "node20"
-  main: "dist/main.js"
+  main: "dist/index.js"
