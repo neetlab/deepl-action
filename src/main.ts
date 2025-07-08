@@ -12,7 +12,7 @@ const targetLang = core.getInput('target-lang', { required: true });
 async function main() {
   const content = await fs.readFile(sourceFile, 'utf8');
 
-  const response = await fetch('https://api.deepl.com/v2/translate', {
+  const response = await fetch('https://api-free.deepl.com/v2/translate', {
     method: 'POST',
     headers: {
       "Content-Type": "application/json",

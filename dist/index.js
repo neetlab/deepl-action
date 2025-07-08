@@ -29978,7 +29978,7 @@ const targetLang = core.getInput('target-lang', { required: true });
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
         const content = yield promises_1.default.readFile(sourceFile, 'utf8');
-        const response = yield fetch('https://api.deepl.com/v2/translate', {
+        const response = yield fetch('https://api-free.deepl.com/v2/translate', {
             method: 'POST',
             headers: {
                 "Content-Type": "application/json",
